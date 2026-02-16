@@ -1,0 +1,11 @@
+# Plugin zip files
+*.zip
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
