@@ -54,7 +54,7 @@ class Woo_MPN_Admin_Columns {
 	}
 
 	/**
-	 * Render MPN column content.
+	 * Render MPN column content (Products list - plain text).
 	 *
 	 * @param string $column  Column ID.
 	 * @param int    $post_id Post ID.
