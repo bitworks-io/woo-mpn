@@ -5,7 +5,7 @@ Tags: woocommerce, product, mpn, manufacturer, sku
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.3.21
+Stable tag: 1.3.24
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -46,7 +46,29 @@ The MPN field appears in the product edit screen within the Product Data panel, 
 
 Yes! Enable "Display on product page" in WooCommerce > Settings > Products > Manufacturer Product Number (MPN). The MPN will appear alongside SKU and other product details. You can also access it programmatically via `$product->get_meta('_mpn')`.
 
+= Product feed compatibility =
+
+MPN is automatically available in product feed mappings for these plugins:
+
+* **Google for WooCommerce / Google Listings & Ads** – MPN appears in Product fields and Custom attributes dropdowns (Marketing > Google for WooCommerce > Attribute mapping)
+* **WooCommerce.com Google Product Feed** – Uses the same attribute mapping; MPN is selectable when creating mapping rules
+* **WooCommerce Google Product Feed** (Lee Willis, woocommerce-gpf) – MPN is injected into the feed via the woocommerce_gpf_feed_item_google filter
+* **Product Feed Manager** (WPMarketingRobot) – MPN is injected via the wppfm_feed_item_value filter
+
+For other feed plugins (CTX Feed, WebToffee, AdTribes Product Feed PRO, etc.): map the custom field or product meta `_mpn` to the MPN attribute in your feed configuration. Many plugins support "Custom fields and post meta" or "Third-party attributes" where you can select or enter `_mpn`.
+
 == Changelog ==
+
+= 1.3.24 =
+* Product feed integration: MPN selectable in feed mapping dropdowns
+* Google for WooCommerce / WooCommerce.com Google Product Feed: MPN in Product fields and Custom attributes
+* WooCommerce Google Product Feed (Lee Willis): woocommerce_gpf_custom_field_list adds MPN to custom field dropdown; woocommerce_gpf_feed_item_google injects MPN into feed
+* Product Feed Manager (WPMarketingRobot): wppfm_feed_item_value injects MPN into feed
+* Load plugin earlier (priority 5) so feed plugins pick up attribute mapping filters
+* Document feed compatibility in readme
+
+= 1.3.22 =
+* MPN column in Products table: responsive width (10%, min 80px, max 180px), word-wrap for long values
 
 = 1.3.21 =
 * Find MPN via AI: serve popup via admin-ajax instead of menu page (fixes "Sorry, you are not allowed to access this page" when popup opens)

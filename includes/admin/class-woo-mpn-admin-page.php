@@ -281,11 +281,11 @@ class Woo_MPN_Admin_Page {
 	 */
 	private function get_puter_mpn_script(): string {
 		return "
-		(function(){ try { console.log('[woo-mpn] script loading'); } catch(e) {} })();
+		(function(){ try { if (typeof wooMpn !== 'undefined' && wooMpn.debug) console.log('[woo-mpn] script loading'); } catch(e) {} })();
 		jQuery(function($) {
 			try {
 			var debug = !!(wooMpn && wooMpn.debug);
-			function dbg(m) { try { console.log('[woo-mpn]', m); } catch(e) {} }
+			function dbg(m) { try { if (debug) console.log('[woo-mpn]', m); } catch(e) {} }
 			function debugLog(msg, isErr) {
 				dbg(msg);
 				if (!debug) return;
@@ -387,7 +387,7 @@ class Woo_MPN_Admin_Page {
 			});
 			dbg('Ready, handlers bound');
 			} catch (err) {
-				try { console.error('[woo-mpn] init error', err); } catch(e) {}
+				try { if (debug) console.error('[woo-mpn] init error', err); } catch(e) {}
 			}
 		});
 		";

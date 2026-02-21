@@ -25,6 +25,30 @@ class Woo_MPN_Admin_Columns {
 		add_action( 'manage_product_posts_custom_column', array( $this, 'render_mpn_column' ), 10, 2 );
 		add_filter( 'manage_edit-product_sortable_columns', array( $this, 'make_mpn_sortable' ) );
 		add_action( 'pre_get_posts', array( $this, 'sort_by_mpn' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_column_styles' ) );
+	}
+
+	/**
+	 * Enqueue CSS for MPN column width (responsive, proportional to table).
+	 *
+	 * @param string $hook Current admin page hook.
+	 */
+	public function enqueue_column_styles( string $hook ): void {
+		if ( 'edit.php' !== $hook || 'product' !== ( $_GET['post_type'] ?? '' ) ) {
+			return;
+		}
+		$css = '
+			.wp-list-table .column-mpn {
+				width: 10%;
+				min-width: 80px;
+				max-width: 180px;
+				word-break: break-word;
+				overflow-wrap: break-word;
+			}
+		';
+		wp_register_style( 'woo-mpn-column', false );
+		wp_enqueue_style( 'woo-mpn-column' );
+		wp_add_inline_style( 'woo-mpn-column', $css );
 	}
 
 	/**
