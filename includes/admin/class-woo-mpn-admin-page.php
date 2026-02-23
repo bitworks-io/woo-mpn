@@ -61,11 +61,64 @@ class Woo_MPN_Admin_Page {
 					$product->save();
 				}
 			}
+			$ean_meta_key = Woo_MPN_Product_Fields::get_ean_save_meta_key();
+			if ( $ean_meta_key ) {
+				$eans = isset( $_POST['ean'] ) && is_array( $_POST['ean'] ) ? wp_unslash( $_POST['ean'] ) : array();
+				foreach ( $eans as $product_id => $ean_value ) {
+					$product_id = (int) $product_id;
+					$product    = wc_get_product( $product_id );
+					if ( $product ) {
+						Woo_MPN_Product_Fields::save_product_ean( $product, sanitize_text_field( $ean_value ) );
+					}
+				}
+			}
 			$redirect = add_query_arg( array(
 				'page'    => self::PAGE_SLUG,
 				'updated' => '1',
 			), admin_url( 'admin.php' ) );
-			foreach ( array( 's', 'product_cat', 'stock_status', 'mpn_status', 'paged', 'orderby', 'order' ) as $param ) {
+			foreach ( array( 's', 'product_cat', 'stock_status', 'mpn_status', 'ean_status', 'per_page', 'paged', 'orderby', 'order', 'debug' ) as $param ) {
+				if ( ! empty( $_POST[ $param ] ) ) {
+					$redirect = add_query_arg( $param, sanitize_text_field( wp_unslash( $_POST[ $param ] ) ), $redirect );
+				}
+			}
+			wp_safe_redirect( $redirect );
+			exit;
+		}
+
+		// Apply Google Product Feed condition to selected products.
+		if ( isset( $_POST['woo_mpn_apply_condition'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['woo_mpn_nonce'] ?? '' ) ), 'woo_mpn_save' ) ) {
+			$product_ids = isset( $_POST['products'] ) && is_array( $_POST['products'] ) ? array_map( 'intval', $_POST['products'] ) : array();
+			$condition   = isset( $_POST['gpf_condition'] ) ? sanitize_text_field( wp_unslash( $_POST['gpf_condition'] ) ) : '';
+			$allowed     = array( 'new', 'refurbished', 'used' );
+			if ( ! empty( $product_ids ) && in_array( $condition, $allowed, true ) ) {
+				$updated = 0;
+				foreach ( $product_ids as $product_id ) {
+					$product = wc_get_product( $product_id );
+					if ( ! $product ) {
+						continue;
+					}
+					$gpf_data = $product->get_meta( '_woocommerce_gpf_data' );
+					if ( ! is_array( $gpf_data ) ) {
+						$gpf_data = is_string( $gpf_data ) ? maybe_unserialize( $gpf_data ) : array();
+						$gpf_data = is_array( $gpf_data ) ? $gpf_data : array();
+					}
+					$current = $gpf_data['condition'] ?? '';
+					if ( $current !== $condition ) {
+						$gpf_data['condition'] = $condition;
+						$product->update_meta_data( '_woocommerce_gpf_data', $gpf_data );
+						$product->save();
+						$updated++;
+					}
+				}
+				$redirect = add_query_arg( array(
+					'page'     => self::PAGE_SLUG,
+					'updated'  => '1',
+					'gpf_done' => (string) $updated,
+				), admin_url( 'admin.php' ) );
+			} else {
+				$redirect = add_query_arg( array( 'page' => self::PAGE_SLUG ), admin_url( 'admin.php' ) );
+			}
+			foreach ( array( 's', 'product_cat', 'stock_status', 'mpn_status', 'ean_status', 'per_page', 'paged', 'orderby', 'order', 'debug' ) as $param ) {
 				if ( ! empty( $_POST[ $param ] ) ) {
 					$redirect = add_query_arg( $param, sanitize_text_field( wp_unslash( $_POST[ $param ] ) ), $redirect );
 				}
@@ -96,7 +149,7 @@ class Woo_MPN_Admin_Page {
 			.woo-mpn-filters { margin-bottom: 20px; padding: 15px; background: #fff; border: 1px solid #c3c4c7; }
 			.woo-mpn-filters .filter-row { margin-bottom: 10px; }
 			.woo-mpn-filters label { display: inline-block; min-width: 100px; }
-			.woo-mpn-input { width: 100%; max-width: 200px; }
+			.woo-mpn-input, .woo-mpn-ean-input { width: 100%; max-width: 200px; }
 			.woo-mpn-bulk-actions { margin: 15px 0; }
 			.woo-mpn-bulk-actions.woo-mpn-busy .button { opacity: 0.6; pointer-events: none; }
 			.woo-mpn-status { margin: 15px 0; padding: 12px 16px; background: #f0f6fc; border-left: 4px solid #2271b1; display: none; }
@@ -110,6 +163,11 @@ class Woo_MPN_Admin_Page {
 			.woo-mpn-debug .woo-mpn-debug-line { margin: 2px 0; }
 			.woo-mpn-debug .woo-mpn-debug-ts { color: #72aee6; margin-right: 8px; }
 			.woo-mpn-debug .woo-mpn-debug-err { color: #f86368; }
+			.woo-mpn-lookup-log { margin: 15px 0; padding: 12px 16px; background: #1d2327; border: 2px solid #2271b1; border-radius: 6px; color: #f0f0f1; font-family: monospace; font-size: 12px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+			.woo-mpn-lookup-log h4 { color: #72aee6; margin: 12px 0 4px 0; }
+			.woo-mpn-lookup-log h4:first-child { margin-top: 0; }
+			.woo-mpn-lookup-log .log-block { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #3c434a; }
+			.woo-mpn-lookup-log .log-block:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
 		' );
 
 		$script_url = plugins_url( 'includes/admin/js/woo-mpn-admin.js', WOO_MPN_PLUGIN_FILE );
@@ -180,7 +238,14 @@ class Woo_MPN_Admin_Page {
 	<meta charset="<?php bloginfo( 'charset' ); ?>">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title><?php esc_html_e( 'MPN AI Lookup', 'woo-mpn' ); ?></title>
-	<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:20px;}</style>
+	<style>
+		body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:20px;}
+		#woo-mpn-popup-log{margin-top:20px;padding:16px;background:#1d2327;color:#f0f0f1;font-family:monospace;font-size:12px;max-height:500px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;border:2px solid #2271b1;border-radius:6px;min-height:100px;}
+		#woo-mpn-popup-close{display:none;margin-top:16px;padding:10px 20px;background:#2271b1;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;}
+		#woo-mpn-popup-log h4{color:#72aee6;margin:12px 0 4px 0;}
+		#woo-mpn-popup-log .log-block{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #3c434a;}
+		#woo-mpn-popup-log .log-block:last-child{border-bottom:none;}
+	</style>
 </head>
 <body>
 	<div class="wrap">
@@ -189,6 +254,10 @@ class Woo_MPN_Admin_Page {
 			<p><?php esc_html_e( 'Loading Puter... If a consent dialog appears, click Continue to agree.', 'woo-mpn' ); ?></p>
 			<p id="woo-mpn-popup-status"></p>
 		</div>
+		<div id="woo-mpn-popup-log" style="display:none;">
+			<p style="color:#72aee6;margin:0;"><?php esc_html_e( 'Lookup log will appear below as products are processed...', 'woo-mpn' ); ?></p>
+		</div>
+		<button type="button" id="woo-mpn-popup-close"><?php esc_html_e( 'Close window', 'woo-mpn' ); ?></button>
 	</div>
 	<script src="https://js.puter.com/v2/"></script>
 	<script src="<?php echo esc_url( includes_url( 'js/jquery/jquery.min.js' ) ); ?>"></script>
@@ -207,22 +276,101 @@ class Woo_MPN_Admin_Page {
 	 * @return string
 	 */
 	private function get_puter_popup_script(): string {
-		$prompt_title = esc_js( __( 'Respond with ONLY the Manufacturer Part Number (MPN) for this product. Product: ', 'woo-mpn' ) );
-		$prompt_sku   = esc_js( __( ' SKU: ', 'woo-mpn' ) );
-		$prompt_url   = esc_js( __( ' Product page: ', 'woo-mpn' ) );
-		$prompt_end   = esc_js( __( ' Reply with ONLY the MPN, nothing else. If unknown: UNKNOWN', 'woo-mpn' ) );
+		$prompt_intro = esc_js( __( 'Reply with exactly two lines. First line: MPN=value. Second line: EAN=value. EAN is the 13-digit barcode. Use UNKNOWN if not found. Product: ', 'woo-mpn' ) );
+		$prompt_url  = esc_js( __( ' URL: ', 'woo-mpn' ) );
 
 		return "
 		(function() {
+			var popupDebug = false;
 			function setStatus(msg) {
 				var el = document.getElementById('woo-mpn-popup-status');
 				if (el) el.textContent = msg;
 			}
-			function parseMpnResponse(text) {
-				if (!text) return '';
-				var t = String(text).trim().toUpperCase();
-				if (t === 'UNKNOWN' || t === 'N/A' || t === 'NONE') return '';
-				return String(text).trim();
+			function appendLog(productId, prompt, response, parsed) {
+				if (!popupDebug) return;
+				var logEl = document.getElementById('woo-mpn-popup-log');
+				if (!logEl) return;
+				if (logEl.querySelectorAll('.log-block').length === 0) {
+					logEl.innerHTML = '';
+					var h = document.createElement('h3');
+					h.textContent = '" . esc_js( __( 'Lookup log (search + result)', 'woo-mpn' ) ) . "';
+					h.style.cssText = 'margin:0 0 12px 0; color:#2271b1;';
+					logEl.appendChild(h);
+				}
+				var block = document.createElement('div');
+				block.className = 'log-block';
+				var h4a = document.createElement('h4');
+				h4a.textContent = 'Product ' + productId + ' - " . esc_js( __( 'Search', 'woo-mpn' ) ) . ":';
+				block.appendChild(h4a);
+				var pre1 = document.createElement('pre');
+				pre1.textContent = prompt || '';
+				block.appendChild(pre1);
+				var h4b = document.createElement('h4');
+				h4b.textContent = '" . esc_js( __( 'Result', 'woo-mpn' ) ) . ":';
+				block.appendChild(h4b);
+				var pre2 = document.createElement('pre');
+				pre2.textContent = response || '';
+				block.appendChild(pre2);
+				if (parsed && (parsed.mpn || parsed.ean)) {
+					var h4c = document.createElement('h4');
+					h4c.textContent = '" . esc_js( __( 'Parsed', 'woo-mpn' ) ) . ":';
+					block.appendChild(h4c);
+					var p = document.createElement('p');
+					p.textContent = 'MPN: ' + (parsed.mpn || '') + ', EAN: ' + (parsed.ean || '');
+					p.style.margin = '4px 0';
+					block.appendChild(p);
+				}
+				logEl.appendChild(block);
+				logEl.scrollTop = logEl.scrollHeight;
+			}
+			function parseValue(val) {
+				if (!val) return '';
+				var t = String(val).trim().toUpperCase();
+				if (t === 'UNKNOWN' || t === 'N/A' || t === 'NONE' || t === '') return '';
+				return String(val).trim();
+			}
+			function isValidEan(val) {
+				if (!val) return false;
+				var s = String(val).trim().replace(/\s/g, '');
+				return /^[0-9]{8}$|^[0-9]{12}$|^[0-9]{13}$|^[0-9]{14}$/.test(s);
+			}
+			function parseMpnEanResponse(text) {
+				var mpn = '', ean = '';
+				if (!text) return { mpn: '', ean: '' };
+				var raw = String(text).trim();
+				var lines = raw.split(/[\\r\\n]+/);
+				for (var i = 0; i < lines.length; i++) {
+					var line = lines[i].trim();
+					var m = line.match(/^MPN\\s*[=:\\-]\\s*(.+)$/i) || line.match(/MPN\\s*[=:\\-]\\s*([^,\\n]+)/i);
+					if (m) mpn = parseValue(m[1]);
+					var e = line.match(/^(?:EAN|GTIN|EAN\\/GTIN)\\s*[=:\\-]\\s*(.+)$/i) || line.match(/(?:EAN|GTIN)[^0-9]*([0-9]{8,14})/i);
+					if (e) ean = parseValue(e[1]);
+				}
+				if (!ean && /(?:EAN|GTIN)[^0-9]*([0-9]{8}|[0-9]{13})/i.test(raw)) {
+					var match = raw.match(/(?:EAN|GTIN)[^0-9]*([0-9]{8}|[0-9]{13})/i);
+					if (match) ean = match[1];
+				}
+				if (!ean && lines.length >= 2) {
+					var second = lines[1].trim().replace(/^[^0-9]*/, '');
+					if (/^[0-9]{8}$|^[0-9]{13}$/.test(second)) ean = second;
+					else ean = parseValue(lines[1].trim());
+				}
+				if (!mpn && !ean && lines.length >= 1) {
+					mpn = parseValue(lines[0].trim());
+				}
+				if (!ean && /^[0-9]{8}$|^[0-9]{13}$/.test(raw)) {
+					ean = raw;
+				}
+				if (!ean) {
+					var digitMatch = raw.match(/\\b([0-9]{8})\\b|\\b([0-9]{12})\\b|\\b([0-9]{13})\\b|\\b([0-9]{14})\\b/);
+					if (digitMatch) ean = (digitMatch[1] || digitMatch[2] || digitMatch[3] || digitMatch[4] || '');
+				}
+				if (ean && !isValidEan(ean)) ean = '';
+				return { mpn: mpn, ean: ean };
+			}
+			function stripSkuFromTitle(t) {
+				if (!t) return '';
+				return String(t).replace(/\s*SKU:\s*\S+/gi, '').trim();
 			}
 			function getRespText(resp) {
 				if (typeof resp === 'string') return resp;
@@ -237,36 +385,82 @@ class Woo_MPN_Admin_Page {
 			window.addEventListener('message', async function(e) {
 				if (e.source !== window.opener || !e.data || e.data.type !== 'woo_mpn_start') return;
 				var productIds = e.data.productIds || [];
+				var products = e.data.products || [];
 				var ajaxUrl = e.data.ajaxUrl || '';
 				var nonce = e.data.nonce || '';
+				popupDebug = !!(e.data.debug);
+				var logEl = document.getElementById('woo-mpn-popup-log');
+				if (logEl) logEl.style.display = popupDebug ? 'block' : 'none';
+				var currentValues = e.data.currentValues || {};
 				if (!productIds.length || !ajaxUrl || !nonce) {
 					if (window.opener) window.opener.postMessage({ type: 'woo_mpn_results', error: 'Invalid data' }, '*');
 					return;
 				}
-				setStatus('" . esc_js( __( 'Loading products...', 'woo-mpn' ) ) . "');
+				if (!products.length) {
+					try {
+						var r = await jQuery.post(ajaxUrl, { action: 'woo_mpn_get_products', nonce: nonce, product_ids: productIds });
+						if (r.success && r.data.products && r.data.products.length) products = r.data.products;
+					} catch (err) {}
+				}
+				if (!products.length) {
+					appendLog(0, 'No products', 'Server returned no products (all may have both MPN and EAN already).');
+					setStatus('" . esc_js( __( 'No products to look up.', 'woo-mpn' ) ) . "');
+					var closeBtn = document.getElementById('woo-mpn-popup-close');
+					if (closeBtn) { closeBtn.style.display = popupDebug ? 'inline-block' : 'none'; closeBtn.onclick = function() { window.close(); }; }
+					if (window.opener) window.opener.postMessage({ type: 'woo_mpn_results', error: 'No products', found: 0, total: 0 }, '*');
+					if (!popupDebug) setTimeout(function() { window.close(); }, 300);
+					return;
+				}
+				setStatus('" . esc_js( __( 'Finding MPN and EAN', 'woo-mpn' ) ) . " (0/' + total + ')');
 				try {
-					var r = await jQuery.post(ajaxUrl, { action: 'woo_mpn_get_products', nonce: nonce, product_ids: productIds });
-					if (!r.success || !r.data.products || !r.data.products.length) {
-						if (window.opener) window.opener.postMessage({ type: 'woo_mpn_results', error: 'No products', found: 0, total: 0 }, '*');
-						return;
-					}
-					var products = r.data.products;
 					var total = products.length;
 					var results = [];
 					var found = 0;
 					for (var i = 0; i < total; i++) {
 						var p = products[i];
-						setStatus('" . esc_js( __( 'Finding MPN', 'woo-mpn' ) ) . " ' + (i+1) + '/' + total);
-						var prompt = '{$prompt_title}' + (p.title || '') + (p.sku ? '{$prompt_sku}' + p.sku : '') + (p.url ? '{$prompt_url}' + p.url : '') + '{$prompt_end}';
+						var cv = currentValues[p.id] || {};
+						var hasMpn = !!(cv.mpn && cv.mpn.length > 0);
+						var hasEan = !!(cv.ean && cv.ean.length > 0);
+						if (hasMpn && hasEan) {
+							results.push({ id: p.id, mpn: cv.mpn, ean: cv.ean, skipped: true });
+							found++;
+							continue;
+						}
+						setStatus('" . esc_js( __( 'Finding MPN and EAN', 'woo-mpn' ) ) . " ' + (i+1) + '/' + total);
+						var prompt;
+						if (hasMpn) {
+							prompt = 'Search the web for the EAN/GTIN barcode. MPN is ' + cv.mpn + '. Product: ' + stripSkuFromTitle(p.title) + '. Find ONLY the EAN or GTIN (8, 12, or 13 digit barcode). Reply with exactly: EAN=value (digits only) or EAN=UNKNOWN';
+						} else {
+							prompt = '{$prompt_intro}' + stripSkuFromTitle(p.title) + (p.url ? '{$prompt_url}' + p.url : '');
+						}
+						if (window.opener) window.opener.postMessage({ type: 'woo_mpn_debug', kind: 'input', productId: p.id, data: prompt }, '*');
 						try {
 							var resp = await puter.ai.chat(prompt, { model: 'claude-haiku-4-5' });
-							var mpn = parseMpnResponse(getRespText(resp));
-							if (mpn) { results.push({ id: p.id, mpn: mpn }); found++; }
-						} catch (err) { console.warn('MPN failed', p.id, err); }
+							var respText = getRespText(resp);
+							var parsed = parseMpnEanResponse(respText);
+							appendLog(p.id, prompt, respText, parsed);
+							if (debug && window.opener) window.opener.postMessage({ type: 'woo_mpn_debug', kind: 'output', productId: p.id, data: { text: respText, parsed: parsed } }, '*');
+							var mpn = hasMpn ? cv.mpn : (parsed.mpn || '');
+							var ean = hasEan ? cv.ean : (parsed.ean || '');
+							results.push({ id: p.id, mpn: mpn, ean: ean, prompt: prompt, response: respText });
+							if (mpn || ean) found++;
+						} catch (err) {
+							appendLog(p.id, prompt, 'Error: ' + (err.message || String(err)));
+							results.push({ id: p.id, mpn: '', ean: '', prompt: prompt, response: 'Error: ' + (err.message || String(err)) });
+						}
 					}
-					if (window.opener) window.opener.postMessage({ type: 'woo_mpn_results', results: results, found: found, total: total }, '*');
+					if (window.opener) window.opener.postMessage({ type: 'woo_mpn_results', results: results, found: found, total: total, debug: popupDebug }, '*');
+					setStatus(popupDebug ? '" . esc_js( __( 'Done. See log above. Click Close window when finished.', 'woo-mpn' ) ) . "' : '" . esc_js( __( 'Done.', 'woo-mpn' ) ) . "');
+					var closeBtn = document.getElementById('woo-mpn-popup-close');
+					if (closeBtn) { closeBtn.style.display = popupDebug ? 'inline-block' : 'none'; closeBtn.onclick = function() { window.close(); }; }
+					if (!popupDebug) setTimeout(function() { window.close(); }, 500);
 				} catch (err) {
+					appendLog(0, 'Error', err.message || String(err));
+					setStatus('" . esc_js( __( 'Error:', 'woo-mpn' ) ) . " ' + (err.message || err));
+					var closeBtn = document.getElementById('woo-mpn-popup-close');
+					if (closeBtn) { closeBtn.style.display = popupDebug ? 'inline-block' : 'none'; closeBtn.onclick = function() { window.close(); }; }
 					if (window.opener) window.opener.postMessage({ type: 'woo_mpn_results', error: err.message || String(err), found: 0, total: 0 }, '*');
+					if (!popupDebug) setTimeout(function() { window.close(); }, 500);
 				}
 			});
 			if (window.opener) window.opener.postMessage({ type: 'woo_mpn_popup_ready' }, '*');
@@ -304,9 +498,15 @@ class Woo_MPN_Admin_Page {
 
 			if (debug) debugLog('Script loaded');
 
+			var promptIntro = '" . esc_js( __( 'Reply with exactly two lines. First line: MPN=value. Second line: EAN=value. EAN is the 13-digit barcode. Use UNKNOWN if not found. Product: ', 'woo-mpn' ) ) . "';
+			var promptUrl = '" . esc_js( __( ' URL: ', 'woo-mpn' ) ) . "';
+			function stripSkuFromTitle(t) {
+				if (!t) return '';
+				return String(t).replace(/\\s*SKU:\\s*\\S+/gi, '').trim();
+			}
 			function openPuterPopup(productIds) {
 				if (!productIds.length) {
-					showStatus('" . esc_js( __( 'No products selected. Select products without MPN to find.', 'woo-mpn' ) ) . "', false);
+					showStatus('" . esc_js( __( 'No products selected. Select products missing MPN or EAN to find.', 'woo-mpn' ) ) . "', false);
 					setTimeout(function() { showStatus('', false); }, 3000);
 					return;
 				}
@@ -315,51 +515,153 @@ class Woo_MPN_Admin_Page {
 					showStatus('" . esc_js( __( 'Popup URL not configured.', 'woo-mpn' ) ) . "', false);
 					return;
 				}
-				showStatus('" . esc_js( __( 'Opening Puter popup...', 'woo-mpn' ) ) . "', true);
-				debugLog('Opening popup for ' + productIds.length + ' products');
-				var w = window.open(popupUrl, 'woo_mpn_puter', 'width=600,height=500,scrollbars=yes');
-				if (!w) {
-					showStatus('" . esc_js( __( 'Popup blocked. Please allow popups for this site.', 'woo-mpn' ) ) . "', false);
-					setTimeout(function() { showStatus('', false); }, 5000);
-					return;
-				}
-				var handler = function(e) {
-					if (e.data && e.data.type === 'woo_mpn_popup_ready') {
-						window.removeEventListener('message', handler);
-						debugLog('Popup ready, sending product IDs');
-						w.postMessage({ type: 'woo_mpn_start', productIds: productIds, ajaxUrl: wooMpn.ajaxUrl, nonce: wooMpn.nonce }, '*');
+				var currentValues = {};
+				productIds.forEach(function(id) {
+					var mpn = ($('input.woo-mpn-input[data-product-id=\"' + id + '\"]').val() || '').trim();
+					var eanEl = $('input.woo-mpn-ean-input[data-product-id=\"' + id + '\"]');
+					if (!eanEl.length) eanEl = $('input[name=\"ean[' + id + ']\"]');
+					var ean = (eanEl.val() || '').trim();
+					if (!ean && !eanEl.length) {
+						var \$td = $('tr').has('input.woo-mpn-input[data-product-id=\"' + id + '\"]').find('td.column-ean');
+						if (\$td.length && !\$td.find('input').length) ean = (\$td.text() || '').trim();
 					}
-				};
-				window.addEventListener('message', handler);
-				var handler2 = function(e) {
-					if (e.data && e.data.type === 'woo_mpn_results') {
-						window.removeEventListener('message', handler2);
-						clearInterval(closeCheck);
-						try { w.close(); } catch (x) {}
-						if (e.data.error) {
-							showStatus('" . esc_js( __( 'Error:', 'woo-mpn' ) ) . " ' + e.data.error, false);
-						} else {
-							var results = e.data.results || [];
-							for (var i = 0; i < results.length; i++) {
-								$('input.woo-mpn-input[data-product-id=\"' + results[i].id + '\"]').val(results[i].mpn);
-							}
-							var found = e.data.found || 0;
-							var total = e.data.total || 0;
-							showStatus('" . esc_js( __( 'Done! Found', 'woo-mpn' ) ) . " ' + found + '/' + total + ' " . esc_js( __( 'MPNs. Click Save MPNs to store.', 'woo-mpn' ) ) . "', false);
-						}
-						setTimeout(function() { showStatus('', false); }, 5000);
-					}
-				};
-				window.addEventListener('message', handler2);
-				var closeCheck = setInterval(function() {
-					if (w.closed) {
-						clearInterval(closeCheck);
-						window.removeEventListener('message', handler);
-						window.removeEventListener('message', handler2);
-						showStatus('" . esc_js( __( 'Popup closed.', 'woo-mpn' ) ) . "', false);
+					currentValues[id] = { mpn: mpn, ean: ean };
+				});
+				showStatus('" . esc_js( __( 'Loading products...', 'woo-mpn' ) ) . "', true);
+				debugLog('Fetching products for ' + productIds.length + ' IDs');
+				jQuery.post(wooMpn.ajaxUrl, { action: 'woo_mpn_get_products', nonce: wooMpn.nonce, product_ids: productIds }).done(function(r) {
+					if (!r.success || !r.data.products || !r.data.products.length) {
+						console.log('[woo-mpn] No products returned from server');
+						showStatus('" . esc_js( __( 'No products to look up.', 'woo-mpn' ) ) . "', false);
 						setTimeout(function() { showStatus('', false); }, 3000);
+						return;
 					}
-				}, 500);
+					var products = r.data.products;
+					console.log('[woo-mpn] Got ' + products.length + ' products, building prompts');
+					var firstPrompt = '';
+					products.forEach(function(p) {
+						var cv = currentValues[p.id] || {};
+						var hasMpn = !!(cv.mpn && cv.mpn.length > 0);
+						var hasEan = !!(cv.ean && cv.ean.length > 0);
+						var prompt;
+						if (hasMpn && hasEan) return;
+						if (hasMpn) {
+							prompt = 'Search the web for the EAN/GTIN barcode. MPN is ' + cv.mpn + '. Product: ' + stripSkuFromTitle(p.title) + '. Reply EAN=value or UNKNOWN';
+						} else {
+							prompt = promptIntro + stripSkuFromTitle(p.title) + (p.url ? promptUrl + p.url : '');
+						}
+						if (!firstPrompt) firstPrompt = prompt;
+						console.log('[woo-mpn] Puter search (product ' + p.id + '):', prompt);
+						debugLog('[woo-mpn] Search product ' + p.id + ': ' + prompt.substring(0, 150) + '...');
+					});
+					showStatus('" . esc_js( __( 'Opening Puter popup...', 'woo-mpn' ) ) . " ' + (firstPrompt ? '(" . esc_js( __( 'Search:', 'woo-mpn' ) ) . " ' + firstPrompt.substring(0, 80) + '...)' : ''), true);
+					var w = window.open(popupUrl, 'woo_mpn_puter', 'width=600,height=500,scrollbars=yes');
+					if (!w) {
+						showStatus('" . esc_js( __( 'Popup blocked. Please allow popups for this site.', 'woo-mpn' ) ) . "', false);
+						setTimeout(function() { showStatus('', false); }, 5000);
+						return;
+					}
+					var handler = function(e) {
+						if (e.data && e.data.type === 'woo_mpn_popup_ready') {
+							window.removeEventListener('message', handler);
+							debugLog('Popup ready, sending product data');
+							w.postMessage({ type: 'woo_mpn_start', productIds: productIds, products: products, ajaxUrl: wooMpn.ajaxUrl, nonce: wooMpn.nonce, debug: wooMpn.debug, currentValues: currentValues }, '*');
+						}
+					};
+					window.addEventListener('message', handler);
+					var debugHandler = function(e) {
+						if (!e.data || e.data.type !== 'woo_mpn_debug') return;
+						var msg = '[woo-mpn] Puter ' + e.data.kind + ' (product ' + e.data.productId + '):';
+						console.log(msg, e.data.data);
+						if (e.data.kind === 'output' && debug) {
+							var d = e.data.data;
+							debugLog(msg + ' text: ' + (d.text || '').substring(0, 300) + ' parsed: ' + JSON.stringify(d.parsed || {}));
+						}
+					};
+					window.addEventListener('message', debugHandler);
+					var handler2 = function(e) {
+						if (e.data && e.data.type === 'woo_mpn_results') {
+							window.removeEventListener('message', debugHandler);
+							window.removeEventListener('message', handler2);
+							clearInterval(closeCheck);
+							showStatus(debug ? '" . esc_js( __( 'Done. Close the popup window when you have finished reviewing the log.', 'woo-mpn' ) ) . "' : '" . esc_js( __( 'Done.', 'woo-mpn' ) ) . "', false);
+							if (e.data.error) {
+								showStatus('" . esc_js( __( 'Error:', 'woo-mpn' ) ) . " ' + e.data.error, false);
+							} else {
+							var results = e.data.results || [];
+							if (debug) {
+								var \$log = $('#woo-mpn-lookup-log');
+								if (!\$log.length) {
+									\$log = $('<div id=\"woo-mpn-lookup-log\" class=\"woo-mpn-lookup-log\"></div>');
+									$('#woo-mpn-status').after(\$log);
+								}
+								\$log.empty().append($('<h4>').text('" . esc_js( __( 'Lookup log', 'woo-mpn' ) ) . "'));
+								for (var i = 0; i < results.length; i++) {
+									var r = results[i];
+									var pid = r.id;
+									if (r.skipped) {
+										var block = $('<div class=\"log-block\"></div>');
+										block.append($('<strong>').text('Product ' + pid + ' - " . esc_js( __( 'Skipped', 'woo-mpn' ) ) . ":'));
+										block.append($('<p>').css({margin:'4px 0'}).text('" . esc_js( __( 'Already has MPN and EAN.', 'woo-mpn' ) ) . "'));
+										\$log.append(block);
+									} else if (r.prompt !== undefined) {
+										console.log('[woo-mpn] Product ' + pid + ' SEARCH:', r.prompt);
+										console.log('[woo-mpn] Product ' + pid + ' RESULT:', r.response || '');
+										var block = $('<div class=\"log-block\"></div>');
+										block.append($('<strong>').text('Product ' + pid + ' - " . esc_js( __( 'Search', 'woo-mpn' ) ) . ":'));
+										block.append($('<pre>').css({margin:'4px 0',whiteSpace:'pre-wrap'}).text(r.prompt || ''));
+										block.append($('<strong>').text('" . esc_js( __( 'Result', 'woo-mpn' ) ) . ":'));
+										block.append($('<pre>').css({margin:'4px 0',whiteSpace:'pre-wrap'}).text(r.response || ''));
+										if (r.mpn || r.ean) {
+											block.append($('<strong>').text('" . esc_js( __( 'Parsed', 'woo-mpn' ) ) . ":'));
+											block.append($('<p>').css({margin:'4px 0'}).text('MPN: ' + (r.mpn || '') + ', EAN: ' + (r.ean || '')));
+										}
+										\$log.append(block);
+									}
+								}
+								\$log.show();
+							}
+							for (var i = 0; i < results.length; i++) {
+								var r = results[i];
+								var pid = r.id;
+								var \$mpnInput = $('input.woo-mpn-input[data-product-id=\"' + pid + '\"]');
+								var \$eanInput = $('input.woo-mpn-ean-input[data-product-id=\"' + pid + '\"]');
+								if (!\$eanInput.length) \$eanInput = $('input[name=\"ean[' + pid + ']\"]');
+								var curMpn = (\$mpnInput.val() || '').trim();
+								var curEan = (\$eanInput.val() || '').trim();
+								if (!\$eanInput.length) {
+									var \$td = $('tr').has('input.woo-mpn-input[data-product-id=\"' + pid + '\"]').find('td.column-ean');
+									if (\$td.length && !\$td.find('input').length) curEan = (\$td.text() || '').trim();
+								}
+								if (\$mpnInput.length) \$mpnInput.val(curMpn || r.mpn || '');
+								if (\$eanInput.length) \$eanInput.val(curEan || r.ean || '');
+								else if ((curEan || r.ean) && !\$eanInput.length) {
+									var \$td = $('tr').has('input.woo-mpn-input[data-product-id=\"' + pid + '\"]').find('td.column-ean');
+									if (\$td.length && !\$td.find('input').length) 									\$td.text(curEan || r.ean || '');
+								}
+							}
+								var found = e.data.found || 0;
+								var total = e.data.total || 0;
+								showStatus('" . esc_js( __( 'Done! Found', 'woo-mpn' ) ) . " ' + found + '/' + total + ' " . esc_js( __( 'products. Click Save to store.', 'woo-mpn' ) ) . "', false);
+							}
+							setTimeout(function() { showStatus('', false); }, 5000);
+						}
+					};
+					window.addEventListener('message', handler2);
+					var closeCheck = setInterval(function() {
+						if (w.closed) {
+							clearInterval(closeCheck);
+							window.removeEventListener('message', debugHandler);
+							window.removeEventListener('message', handler);
+							window.removeEventListener('message', handler2);
+							showStatus('" . esc_js( __( 'Popup closed.', 'woo-mpn' ) ) . "', false);
+							setTimeout(function() { showStatus('', false); }, 3000);
+						}
+					}, 500);
+				}).fail(function() {
+					showStatus('" . esc_js( __( 'Failed to load products.', 'woo-mpn' ) ) . "', false);
+					setTimeout(function() { showStatus('', false); }, 5000);
+				});
 			}
 
 			$(document).on('click', '#woo-mpn-find-selected', function(e) {
@@ -377,13 +679,27 @@ class Woo_MPN_Admin_Page {
 				e.stopPropagation();
 				dbg('Find all clicked');
 				var ids = [];
-				$('input[name=\"products[]\"]').not(':disabled').each(function() { ids.push($(this).val()); });
+				$('input[name=\"products[]\"]').not('[data-has-both=\"1\"]').each(function() { ids.push($(this).val()); });
 				debugLog('Find all, ids=' + JSON.stringify(ids));
 				openPuterPopup(ids);
 			});
 
 			$(document).on('change', '#cb-select-all', function() {
-				$('input[name=\"products[]\"]').not(':disabled').prop('checked', $(this).prop('checked'));
+				$('input[name=\"products[]\"]').prop('checked', $(this).prop('checked'));
+			});
+			$(document).on('click', '#woo-mpn-apply-condition', function(e) {
+				e.preventDefault();
+				var cond = $('#gpf-condition-select').val();
+				var checked = $('input[name=\"products[]\"]:checked').length;
+				if (!cond) {
+					alert('" . esc_js( __( 'Please select a condition (New, Refurbished, or Used).', 'woo-mpn' ) ) . "');
+					return;
+				}
+				if (checked === 0) {
+					alert('" . esc_js( __( 'Please select at least one product.', 'woo-mpn' ) ) . "');
+					return;
+				}
+				$('#woo-mpn-products-form').append($('<input>').attr({type:'hidden',name:'woo_mpn_apply_condition',value:'1'})).submit();
 			});
 			dbg('Ready, handlers bound');
 			} catch (err) {
@@ -406,7 +722,7 @@ class Woo_MPN_Admin_Page {
 		$pages   = $pag['total_pages'];
 		$current = $pag['current_page'];
 		$base_url = add_query_arg( array( 'page' => self::PAGE_SLUG ), admin_url( 'admin.php' ) );
-		foreach ( array( 's', 'product_cat', 'stock_status', 'mpn_status', 'per_page', 'orderby', 'order', 'debug' ) as $param ) {
+		foreach ( array( 's', 'product_cat', 'stock_status', 'mpn_status', 'ean_status', 'per_page', 'orderby', 'order', 'debug' ) as $param ) {
 			if ( ! empty( $_GET[ $param ] ) ) {
 				$base_url = add_query_arg( $param, sanitize_text_field( wp_unslash( $_GET[ $param ] ) ), $base_url );
 			}
@@ -426,18 +742,21 @@ class Woo_MPN_Admin_Page {
 						<th scope="col" class="column-price"><?php esc_html_e( 'Price', 'woo-mpn' ); ?></th>
 						<th scope="col" class="column-stock"><?php esc_html_e( 'Stock', 'woo-mpn' ); ?></th>
 						<th scope="col" class="column-mpn"><?php esc_html_e( 'MPN', 'woo-mpn' ); ?></th>
+						<th scope="col" class="column-ean"><?php esc_html_e( 'EAN', 'woo-mpn' ); ?></th>
 					</tr>
 				</thead>
 				<tbody>
 					<?php foreach ( $items as $item ) : ?>
 						<?php
 						$has_mpn  = ! empty( $item->mpn );
-						$disabled = $has_mpn ? ' disabled' : '';
+						$has_ean  = ! empty( $item->ean );
+						$has_both = $has_mpn && $has_ean;
 						$edit_url = get_edit_post_link( $item->id );
+						$ean_writable = Woo_MPN_Product_Fields::get_ean_save_meta_key();
 						?>
 						<tr>
 							<th scope="row" class="check-column">
-								<input type="checkbox" name="products[]" value="<?php echo (int) $item->id; ?>" <?php echo $disabled; ?> title="<?php echo $has_mpn ? esc_attr__( 'Product has MPN - AI lookup skipped', 'woo-mpn' ) : ''; ?>" />
+								<input type="checkbox" name="products[]" value="<?php echo (int) $item->id; ?>" <?php echo $has_both ? 'data-has-both="1" ' : ''; ?>title="<?php echo $has_both ? esc_attr__( 'Product has MPN and EAN - AI lookup skipped', 'woo-mpn' ) : ''; ?>" />
 							</th>
 							<td class="column-id"><?php echo $edit_url ? '<a href="' . esc_url( $edit_url ) . '">' . (int) $item->id . '</a>' : (int) $item->id; ?></td>
 							<td class="column-title"><?php echo $edit_url ? '<a href="' . esc_url( $edit_url ) . '" class="row-title"><strong>' . esc_html( $item->title ?? '' ) . '</strong></a>' : '<strong>' . esc_html( $item->title ?? '' ) . '</strong>'; ?></td>
@@ -446,6 +765,13 @@ class Woo_MPN_Admin_Page {
 							<td class="column-stock"><?php echo esc_html( (string) ( $item->stock ?? '—' ) ); ?></td>
 							<td class="column-mpn">
 								<input type="text" name="mpn[<?php echo (int) $item->id; ?>]" value="<?php echo esc_attr( $item->mpn ?? '' ); ?>" class="woo-mpn-input" data-product-id="<?php echo (int) $item->id; ?>" data-has-mpn="<?php echo $has_mpn ? '1' : '0'; ?>" placeholder="<?php esc_attr_e( 'Enter MPN', 'woo-mpn' ); ?>" />
+							</td>
+							<td class="column-ean">
+								<?php if ( $ean_writable ) : ?>
+									<input type="text" name="ean[<?php echo (int) $item->id; ?>]" value="<?php echo esc_attr( $item->ean ?? '' ); ?>" class="woo-mpn-ean-input" data-product-id="<?php echo (int) $item->id; ?>" placeholder="<?php esc_attr_e( 'Enter EAN', 'woo-mpn' ); ?>" />
+								<?php else : ?>
+									<?php echo esc_html( $item->ean ?? '' ); ?>
+								<?php endif; ?>
 							</td>
 						</tr>
 					<?php endforeach; ?>
@@ -496,11 +822,19 @@ class Woo_MPN_Admin_Page {
 		}
 		?>
 		<div class="wrap">
-			<h1><?php esc_html_e( 'MPN Products', 'woo-mpn' ); ?></h1>
+			<h1>
+				<?php esc_html_e( 'MPN Products', 'woo-mpn' ); ?>
+				<a href="<?php echo esc_url( admin_url( 'admin.php?page=wc-settings&tab=products&section=woo_mpn' ) ); ?>" class="page-title-action"><?php esc_html_e( 'Settings', 'woo-mpn' ); ?></a>
+			</h1>
 
 			<?php
 		if ( isset( $_GET['updated'] ) && '1' === $_GET['updated'] ) {
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'MPNs saved successfully.', 'woo-mpn' ) . '</p></div>';
+			if ( isset( $_GET['gpf_done'] ) && is_numeric( $_GET['gpf_done'] ) ) {
+				$n = (int) $_GET['gpf_done'];
+				echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sprintf( _n( 'Google Feed condition applied to %d product.', 'Google Feed condition applied to %d products.', $n, 'woo-mpn' ), $n ) ) . '</p></div>';
+			} else {
+				echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'MPNs and EANs saved successfully.', 'woo-mpn' ) . '</p></div>';
+			}
 		}
 		?>
 
@@ -545,6 +879,16 @@ class Woo_MPN_Admin_Page {
 							<option value="empty" <?php selected( isset( $_GET['mpn_status'] ) && 'empty' === $_GET['mpn_status'] ); ?>><?php esc_html_e( 'No MPN', 'woo-mpn' ); ?></option>
 						</select>
 					</div>
+					<?php if ( Woo_MPN_Product_Fields::get_ean_filter_meta_key() ) : ?>
+					<div class="filter-row">
+						<label for="ean_status"><?php esc_html_e( 'EAN Status', 'woo-mpn' ); ?></label>
+						<select id="ean_status" name="ean_status">
+							<option value=""><?php esc_html_e( 'All', 'woo-mpn' ); ?></option>
+							<option value="has" <?php selected( isset( $_GET['ean_status'] ) && 'has' === $_GET['ean_status'] ); ?>><?php esc_html_e( 'Has EAN', 'woo-mpn' ); ?></option>
+							<option value="empty" <?php selected( isset( $_GET['ean_status'] ) && 'empty' === $_GET['ean_status'] ); ?>><?php esc_html_e( 'No EAN', 'woo-mpn' ); ?></option>
+						</select>
+					</div>
+					<?php endif; ?>
 					<div class="filter-row">
 						<button type="submit" class="button button-primary"><?php esc_html_e( 'Apply Filters', 'woo-mpn' ); ?></button>
 						<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ); ?>" class="button"><?php esc_html_e( 'Reset', 'woo-mpn' ); ?></a>
@@ -556,16 +900,26 @@ class Woo_MPN_Admin_Page {
 				<?php wp_nonce_field( 'woo_mpn_save', 'woo_mpn_nonce' ); ?>
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>" />
 				<?php
-				foreach ( array( 's', 'product_cat', 'stock_status', 'mpn_status', 'per_page', 'paged', 'orderby', 'order', 'debug' ) as $param ) {
+				foreach ( array( 's', 'product_cat', 'stock_status', 'mpn_status', 'ean_status', 'per_page', 'paged', 'orderby', 'order', 'debug' ) as $param ) {
 					if ( ! empty( $_GET[ $param ] ) ) {
 						echo '<input type="hidden" name="' . esc_attr( $param ) . '" value="' . esc_attr( wp_unslash( $_GET[ $param ] ) ) . '" />';
 					}
 				}
 				?>
 				<div class="woo-mpn-bulk-actions" id="woo-mpn-bulk-actions">
-					<button type="button" id="woo-mpn-find-selected" class="button" onclick="var s=document.getElementById('woo-mpn-status');if(s){s.className='woo-mpn-status woo-mpn-active';s.innerHTML='<span class=\'spinner is-active\'></span> <?php echo esc_js( __( 'Starting...', 'woo-mpn' ) ); ?>';}"><?php esc_html_e( 'Find MPN via AI (selected)', 'woo-mpn' ); ?></button>
-					<button type="button" id="woo-mpn-find-all" class="button" onclick="var s=document.getElementById('woo-mpn-status');if(s){s.className='woo-mpn-status woo-mpn-active';s.innerHTML='<span class=\'spinner is-active\'></span> <?php echo esc_js( __( 'Starting...', 'woo-mpn' ) ); ?>';}"><?php echo esc_html__( 'Find MPN via AI (all without MPN)', 'woo-mpn' ); ?></button>
-					<button type="submit" name="woo_mpn_save" class="button button-primary"><?php esc_html_e( 'Save MPNs', 'woo-mpn' ); ?></button>
+					<button type="button" id="woo-mpn-find-selected" class="button" onclick="var s=document.getElementById('woo-mpn-status');if(s){s.className='woo-mpn-status woo-mpn-active';s.innerHTML='<span class=\'spinner is-active\'></span> <?php echo esc_js( __( 'Starting...', 'woo-mpn' ) ); ?>';}"><?php esc_html_e( 'Find MPN & EAN via AI (selected)', 'woo-mpn' ); ?></button>
+					<button type="button" id="woo-mpn-find-all" class="button" onclick="var s=document.getElementById('woo-mpn-status');if(s){s.className='woo-mpn-status woo-mpn-active';s.innerHTML='<span class=\'spinner is-active\'></span> <?php echo esc_js( __( 'Starting...', 'woo-mpn' ) ); ?>';}"><?php esc_html_e( 'Find MPN & EAN via AI (all without both)', 'woo-mpn' ); ?></button>
+					<button type="submit" name="woo_mpn_save" class="button button-primary"><?php esc_html_e( 'Save MPNs & EANs', 'woo-mpn' ); ?></button>
+					<span class="woo-mpn-bulk-sep" style="margin: 0 8px; color: #c3c4c7;">|</span>
+					<label for="gpf-condition-select" class="screen-reader-text"><?php esc_html_e( 'Google Feed condition', 'woo-mpn' ); ?></label>
+					<select id="gpf-condition-select" name="gpf_condition" style="margin-right: 4px;">
+						<option value=""><?php esc_html_e( 'Set condition (selected)', 'woo-mpn' ); ?></option>
+						<option value="new"><?php esc_html_e( 'New', 'woo-mpn' ); ?></option>
+						<option value="refurbished"><?php esc_html_e( 'Refurbished', 'woo-mpn' ); ?></option>
+						<option value="used"><?php esc_html_e( 'Used', 'woo-mpn' ); ?></option>
+					</select>
+					<button type="button" id="woo-mpn-apply-condition" class="button"><?php esc_html_e( 'Apply to selected', 'woo-mpn' ); ?></button>
+					<span class="description" style="margin-left: 8px;"><?php esc_html_e( 'Sets product condition for Google Product Feed (new, refurbished, used).', 'woo-mpn' ); ?></span>
 				</div>
 				<div class="woo-mpn-status" id="woo-mpn-status" role="status" aria-live="polite"></div>
 				<?php if ( isset( $_GET['debug'] ) && '1' === $_GET['debug'] ) : ?>
@@ -574,7 +928,8 @@ class Woo_MPN_Admin_Page {
 					<div class="woo-mpn-debug" id="woo-mpn-debug"><div class="woo-mpn-debug-line"><span class="woo-mpn-debug-ts">[--]</span> <?php esc_html_e( 'Debug mode. Click Find MPN via AI to see flow.', 'woo-mpn' ); ?></div></div>
 				</div>
 				<?php endif; ?>
-				<p class="description"><?php esc_html_e( 'Find MPN via AI opens a popup where Puter loads. Click Continue in the consent dialog if prompted. Products with existing MPN are excluded.', 'woo-mpn' ); ?></p>
+				<p class="description"><?php esc_html_e( 'Find MPN & EAN via AI opens a popup where Puter loads. Click Continue in the consent dialog if prompted. Products with both MPN and EAN are excluded.', 'woo-mpn' ); ?></p>
+				<p class="description" style="margin-top: 8px; color: #646970;"><?php esc_html_e( 'Note: The free search has usage limitations and will support around a few hundred searches per month. This is a general estimate based on testing; the exact limit may vary.', 'woo-mpn' ); ?></p>
 				<?php $this->render_products_table( $list_table ); ?>
 			</form>
 		</div>

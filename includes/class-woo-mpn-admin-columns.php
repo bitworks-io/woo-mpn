@@ -13,18 +13,27 @@ defined( 'ABSPATH' ) || exit;
 class Woo_MPN_Admin_Columns {
 
 	/**
-	 * Column ID.
+	 * Column ID for MPN.
 	 */
 	public const COLUMN_ID = 'mpn';
+
+	/**
+	 * Column ID for EAN.
+	 */
+	public const COLUMN_ID_EAN = 'ean';
 
 	/**
 	 * Constructor.
 	 */
 	public function __construct() {
 		add_filter( 'manage_edit-product_columns', array( $this, 'add_mpn_column' ), 20 );
+		add_filter( 'manage_edit-product_columns', array( $this, 'add_ean_column' ), 21 );
 		add_action( 'manage_product_posts_custom_column', array( $this, 'render_mpn_column' ), 10, 2 );
+		add_action( 'manage_product_posts_custom_column', array( $this, 'render_ean_column' ), 10, 2 );
 		add_filter( 'manage_edit-product_sortable_columns', array( $this, 'make_mpn_sortable' ) );
+		add_filter( 'manage_edit-product_sortable_columns', array( $this, 'make_ean_sortable' ) );
 		add_action( 'pre_get_posts', array( $this, 'sort_by_mpn' ) );
+		add_action( 'pre_get_posts', array( $this, 'sort_by_ean' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_column_styles' ) );
 	}
 
@@ -38,7 +47,8 @@ class Woo_MPN_Admin_Columns {
 			return;
 		}
 		$css = '
-			.wp-list-table .column-mpn {
+			.wp-list-table .column-mpn,
+			.wp-list-table .column-ean {
 				width: 10%;
 				min-width: 80px;
 				max-width: 180px;
@@ -78,6 +88,31 @@ class Woo_MPN_Admin_Columns {
 	}
 
 	/**
+	 * Add EAN column to the product list table.
+	 *
+	 * @param array $columns Existing columns.
+	 * @return array
+	 */
+	public function add_ean_column( array $columns ): array {
+		$new_columns = array();
+
+		foreach ( $columns as $key => $value ) {
+			$new_columns[ $key ] = $value;
+
+			// Insert EAN column after MPN.
+			if ( self::COLUMN_ID === $key ) {
+				$new_columns[ self::COLUMN_ID_EAN ] = __( 'EAN', 'woo-mpn' );
+			}
+		}
+
+		if ( ! isset( $new_columns[ self::COLUMN_ID_EAN ] ) ) {
+			$new_columns[ self::COLUMN_ID_EAN ] = __( 'EAN', 'woo-mpn' );
+		}
+
+		return $new_columns;
+	}
+
+	/**
 	 * Render MPN column content (Products list - plain text).
 	 *
 	 * @param string $column  Column ID.
@@ -99,6 +134,27 @@ class Woo_MPN_Admin_Columns {
 	}
 
 	/**
+	 * Render EAN column content (Products list - plain text).
+	 *
+	 * @param string $column  Column ID.
+	 * @param int    $post_id Post ID.
+	 */
+	public function render_ean_column( string $column, int $post_id ): void {
+		if ( self::COLUMN_ID_EAN !== $column ) {
+			return;
+		}
+
+		$product = wc_get_product( $post_id );
+		if ( ! $product ) {
+			echo '—';
+			return;
+		}
+
+		$ean = Woo_MPN_Product_Fields::get_product_ean( $product );
+		echo $ean ? esc_html( $ean ) : '—';
+	}
+
+	/**
 	 * Make MPN column sortable.
 	 *
 	 * @param array $columns Sortable columns.
@@ -106,6 +162,20 @@ class Woo_MPN_Admin_Columns {
 	 */
 	public function make_mpn_sortable( array $columns ): array {
 		$columns[ self::COLUMN_ID ] = self::COLUMN_ID;
+		return $columns;
+	}
+
+	/**
+	 * Make EAN column sortable.
+	 *
+	 * @param array $columns Sortable columns.
+	 * @return array
+	 */
+	public function make_ean_sortable( array $columns ): array {
+		$ean_key = Woo_MPN_Product_Fields::get_ean_filter_meta_key();
+		if ( $ean_key ) {
+			$columns[ self::COLUMN_ID_EAN ] = self::COLUMN_ID_EAN;
+		}
 		return $columns;
 	}
 
@@ -131,5 +201,32 @@ class Woo_MPN_Admin_Columns {
 
 		$query->set( 'meta_key', Woo_MPN_Product_Fields::META_KEY );
 		$query->set( 'orderby', 'meta_value' );
+	}
+
+	/**
+	 * Handle sorting by EAN.
+	 *
+	 * @param WP_Query $query The query object.
+	 */
+	public function sort_by_ean( WP_Query $query ): void {
+		if ( ! is_admin() || ! $query->is_main_query() ) {
+			return;
+		}
+
+		$screen = get_current_screen();
+		if ( ! $screen || 'edit-product' !== $screen->id ) {
+			return;
+		}
+
+		$orderby = $query->get( 'orderby' );
+		if ( self::COLUMN_ID_EAN !== $orderby ) {
+			return;
+		}
+
+		$ean_key = Woo_MPN_Product_Fields::get_ean_filter_meta_key();
+		if ( $ean_key ) {
+			$query->set( 'meta_key', $ean_key );
+			$query->set( 'orderby', 'meta_value' );
+		}
 	}
 }

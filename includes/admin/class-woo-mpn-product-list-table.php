@@ -43,6 +43,7 @@ class Woo_MPN_Product_List_Table extends WP_List_Table {
 			'price' => __( 'Price', 'woo-mpn' ),
 			'stock' => __( 'Stock', 'woo-mpn' ),
 			'mpn'   => __( 'MPN', 'woo-mpn' ),
+			'ean'   => __( 'EAN', 'woo-mpn' ),
 		);
 	}
 
@@ -59,6 +60,7 @@ class Woo_MPN_Product_List_Table extends WP_List_Table {
 			'price' => array( 'price', false ),
 			'stock' => array( 'stock', false ),
 			'mpn'   => array( 'mpn', false ),
+			'ean'   => array( 'ean', false ),
 		);
 	}
 
@@ -83,13 +85,15 @@ class Woo_MPN_Product_List_Table extends WP_List_Table {
 	 * @return string
 	 */
 	protected function column_cb( $item ): string {
-		$has_mpn  = ! empty( $item->mpn );
-		$disabled = $has_mpn ? ' disabled' : '';
-		$title    = $has_mpn ? __( 'Product has MPN - AI lookup skipped', 'woo-mpn' ) : '';
+		$has_mpn   = ! empty( $item->mpn );
+		$has_ean   = ! empty( $item->ean );
+		$has_both  = $has_mpn && $has_ean;
+		$data_attr = $has_both ? 'data-has-both="1" ' : '';
+		$title     = $has_both ? __( 'Product has MPN and EAN - AI lookup skipped', 'woo-mpn' ) : '';
 		return sprintf(
 			'<input type="checkbox" name="products[]" value="%d" %s title="%s" />',
 			(int) $item->id,
-			$disabled,
+			$data_attr,
 			esc_attr( $title )
 		);
 	}
@@ -132,6 +136,23 @@ class Woo_MPN_Product_List_Table extends WP_List_Table {
 		$name  = 'mpn[' . (int) $item->id . ']';
 		$value = esc_attr( $mpn );
 		return '<input type="text" name="' . esc_attr( $name ) . '" value="' . $value . '" class="woo-mpn-input" data-product-id="' . (int) $item->id . '" placeholder="' . esc_attr__( 'Enter MPN', 'woo-mpn' ) . '" />';
+	}
+
+	/**
+	 * Column EAN - editable input when writable, else display only.
+	 *
+	 * @param object $item Item.
+	 * @return string
+	 */
+	protected function column_ean( $item ): string {
+		$ean     = $item->ean ?? '';
+		$meta_key = Woo_MPN_Product_Fields::get_ean_save_meta_key();
+		if ( $meta_key ) {
+			$name  = 'ean[' . (int) $item->id . ']';
+			$value = esc_attr( $ean );
+			return '<input type="text" name="' . esc_attr( $name ) . '" value="' . $value . '" class="woo-mpn-ean-input" data-product-id="' . (int) $item->id . '" placeholder="' . esc_attr__( 'Enter EAN', 'woo-mpn' ) . '" />';
+		}
+		return esc_html( $ean );
 	}
 
 	/**
@@ -269,6 +290,14 @@ class Woo_MPN_Product_List_Table extends WP_List_Table {
 				'compare' => 'has' === $mpn_status ? 'EXISTS' : 'NOT EXISTS',
 			);
 		}
+		$ean_meta_key = Woo_MPN_Product_Fields::get_ean_filter_meta_key();
+		if ( $ean_meta_key && isset( $_GET['ean_status'] ) && '' !== $_GET['ean_status'] ) {
+			$ean_status   = sanitize_key( $_GET['ean_status'] );
+			$meta_query[] = array(
+				'key'     => $ean_meta_key,
+				'compare' => 'has' === $ean_status ? 'EXISTS' : 'NOT EXISTS',
+			);
+		}
 		if ( ! empty( $meta_query ) ) {
 			$meta_query['relation'] = 'AND';
 			$query_args['meta_query'] = $meta_query;
@@ -288,6 +317,7 @@ class Woo_MPN_Product_List_Table extends WP_List_Table {
 			}
 
 			$mpn = Woo_MPN_Product_Fields::get_product_mpn( $product );
+			$ean = Woo_MPN_Product_Fields::get_product_ean( $product );
 
 			$price = $product->get_price();
 			$stock = $product->get_stock_quantity();
@@ -305,6 +335,7 @@ class Woo_MPN_Product_List_Table extends WP_List_Table {
 				'stock'        => $stock,
 				'stock_status' => $product->get_stock_status(),
 				'mpn'          => $mpn,
+				'ean'          => $ean,
 			);
 		}
 

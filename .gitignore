@@ -7,6 +7,8 @@
 # IDE
 .idea/
 .vscode/
-.cursor/
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
 *.swp
 *.swo

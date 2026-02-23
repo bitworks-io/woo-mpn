@@ -5,11 +5,11 @@ Tags: woocommerce, product, mpn, manufacturer, sku
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.3.24
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Adds a Manufacturer Product Number (MPN) field to WooCommerce products with admin table display.
+Adds Manufacturer Product Number (MPN) and EAN/GTIN fields to WooCommerce products with admin table display.
 
 == Description ==
 
@@ -17,14 +17,14 @@ Manufacturer Product Number (MPN) by Tyria Tech extends WooCommerce to store and
 
 **Features:**
 
-* Adds an MPN field in the product edit screen (SKU section)
+* Adds MPN and EAN/GTIN fields in the product edit screen (SKU section)
 * Supports both simple and variable products
-* Displays MPN in the admin product list table
-* Sortable MPN column
+* Displays MPN and EAN in the admin product list table
+* Sortable MPN and EAN columns
 * Optional display of MPN on the product page (alongside SKU, etc.) - enable in Settings
-* MPN Products admin page with product table (ID, title, SKU, price, stock, MPN)
-* Filters: search, category, stock status, MPN status
-* Puter.js AI chat for automatic MPN lookup (products without MPN only, no API keys)
+* MPN Products admin page with product table (ID, title, SKU, price, stock, MPN, EAN)
+* Filters: search, category, stock status, MPN status, EAN status
+* Puter.js AI chat for automatic MPN and EAN lookup (products missing either, no API keys)
 * HPOS (High Performance Order Storage) compatible
 * Uses WooCommerce CRUD APIs for modern data handling
 
@@ -58,6 +58,31 @@ MPN is automatically available in product feed mappings for these plugins:
 For other feed plugins (CTX Feed, WebToffee, AdTribes Product Feed PRO, etc.): map the custom field or product meta `_mpn` to the MPN attribute in your feed configuration. Many plugins support "Custom fields and post meta" or "Third-party attributes" where you can select or enter `_mpn`.
 
 == Changelog ==
+
+= 1.5.0 =
+* Add Google Product Feed condition bulk action (new, refurbished, used) for selected products
+* Allow selecting products with MPN+EAN for GPF condition (checkboxes no longer disabled)
+* Fix per_page persistence after save
+* Debug mode: only show lookup log and popup output when debug=1; auto-close popup when not in debug
+* Fix ampersand display in popup status (Finding MPN and EAN)
+* Use claude-haiku-4-5 for all lookups (lower cost)
+* Add usage note for free search limitations
+
+= 1.4.0 =
+* EAN/GTIN support: configurable source (plugin field, WooCommerce Global Unique ID, _gtin, _ts_gtin, or custom meta/attribute)
+* EAN column and filter on MPN Products page
+* AI lookup finds both MPN and EAN
+* EAN registered for feed plugins (GLA, WooCommerce Google Product Feed, Product Feed Manager)
+* EAN column in Products list (sortable when meta-based source)
+
+= 1.3.26 =
+* Add redirect to map WooCommerce Product Feed IDs to WooCommerce product IDs in checkout URLs
+* Enables sharable checkout URL generation from Google (products=woocommerce_gpf_123:1 redirects to products=123:1)
+* Remove feed modification filters; use redirect approach instead
+
+= 1.3.25 =
+* Add setting: Use WooCommerce product ID in feed (guid) for automated checkout URL generation
+* WooCommerce Google Product Feed: set guid and item_group_id to match product IDs when enabled
 
 = 1.3.24 =
 * Product feed integration: MPN selectable in feed mapping dropdowns

@@ -16,10 +16,10 @@ defined( 'ABSPATH' ) || exit;
 class Woo_MPN_Puter_Lookup {
 
 	/**
-	 * Get product data for Puter.js MPN lookup.
+	 * Get product data for Puter.js MPN/EAN lookup.
 	 *
 	 * @param int[] $product_ids Product IDs.
-	 * @return array Array of { id, title, url, sku }.
+	 * @return array Array of { id, title, url }.
 	 */
 	public static function get_products_for_lookup( array $product_ids ): array {
 		$products = array();
@@ -30,9 +30,10 @@ class Woo_MPN_Puter_Lookup {
 				continue;
 			}
 
-			// Skip products that already have MPN.
+			// Skip products that already have both MPN and EAN.
 			$existing_mpn = Woo_MPN_Product_Fields::get_product_mpn( $product );
-			if ( '' !== $existing_mpn ) {
+			$existing_ean = Woo_MPN_Product_Fields::get_product_ean( $product );
+			if ( '' !== $existing_mpn && '' !== $existing_ean ) {
 				continue;
 			}
 
@@ -40,7 +41,6 @@ class Woo_MPN_Puter_Lookup {
 				'id'    => $product->get_id(),
 				'title' => $product->get_name(),
 				'url'   => get_permalink( $product->get_id() ),
-				'sku'   => $product->get_sku(),
 			);
 		}
 
